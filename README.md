@@ -2,6 +2,10 @@
 
 This plugin provides a [Dart](https://dart.dev/) and [Flutter](https://flutter.dev/) tests adapter for the [Neotest](https://github.com/rcarriga/neotest) framework.
 
+## Fixed
+- **Failing tests no longer crash with a Lua error.** When a test failed, the parsed output was returned as raw text instead of a file path in some code paths, causing neotest to try opening the failure message itself as a file (`ENOENT: no such file or directory: message`). Output handling now always resolves to a valid file path.
+- **Debugging tests via the `dap` strategy now correctly reports pass/fail.** Running tests through `require("neotest").run.run({ strategy = "dap" })` previously always showed results as failed (or hung indefinitely), because the debug adapter never emits the JSON test reporter output on stdout — it instead sends test progress via a custom `dart.testNotification` DAP event. neotest-dart now listens for these events directly and builds results from them, so debug runs report accurate pass/fail status.
+
 ## Installation
 
 Using packer:

@@ -20,6 +20,30 @@ local outline = {}
 local lsp_autocmd_registered = false
 local wrapped_outline_clients = {}
 
+local dap_test_notifications = {}
+local dap_listener_registered = false
+local is_dap_run = false
+
+local function register_dap_test_notification_handler()
+  if dap_listener_registered then
+    return
+  end
+  local ok, dap = pcall(require, 'dap')
+  if not ok then
+    return
+  end
+  dap_listener_registered = true
+
+  dap.listeners.after['event_dart.testNotification'] =
+    dap.listeners.after['event_dart.testNotification'] or {}
+  dap.listeners.after['event_dart.testNotification']['neotest-dart'] = function(_, body)
+    local ok_encode, encoded = pcall(vim.json.encode, body)
+    if ok_encode then
+      table.insert(dap_test_notifications, encoded)
+    end
+  end
+end
+
 local function flatten(list)
   local result = {}
 
@@ -51,7 +75,7 @@ local function resolve_dap_command()
 
   if uses_fvm(command) then
     local dap_bin_symlink =
-      utils.join_path(vim.loop.cwd(), '.fvm', 'flutter_sdk', 'bin', dap_command)
+        utils.join_path(vim.loop.cwd(), '.fvm', 'flutter_sdk', 'bin', dap_command)
     return vim.loop.fs_realpath(dap_bin_symlink) or dap_command
   end
 
@@ -119,12 +143,28 @@ function adapter.discover_positions(path)
   return tree
 end
 
+-- local function construct_test_argument(position, strategy)
+--   local test_argument = {}
+--   if uses_flutter(command) then
+--     table.insert(test_argument, '--no-pub')
+--   end
+--
+--   return test_argument
+-- end
+
 local function construct_test_argument(position, strategy)
   local test_argument = {}
   if uses_flutter(command) then
     table.insert(test_argument, '--no-pub')
   end
-
+  if strategy == 'dap' then
+    table.insert(test_argument, '--reporter')
+    table.insert(test_argument, 'json')
+    if position.type == 'test' or position.type == 'namespace' then
+      table.insert(test_argument, '--plain-name')
+      table.insert(test_argument, position.name)
+    end
+  end
   return test_argument
 end
 
@@ -171,12 +211,18 @@ function adapter.build_spec(args)
     return {}
   end
 
+  is_dap_run = (args.strategy == 'dap')
+  if is_dap_run then
+    dap_test_notifications = {}
+    register_dap_test_notification_handler()
+  end
+
   local position = tree:data()
 
   local command_parts = {}
 
   if position.type == 'dir' then
-    if string.sub(position.path, -#'/test') == '/test' then
+    if string.sub(position.path, - #'/test') == '/test' then
       command_parts = {
         command,
         'test',
@@ -219,7 +265,7 @@ function adapter.build_spec(args)
   end
   vim.list_extend(command_parts, extra_args)
 
-  local strategy_target = args.strategy == 'dap' and test_target or position.path
+  local strategy_target = position.path
   local strategy_config = get_strategy_config(args.strategy, strategy_target, test_argument)
   local full_command = table.concat(vim.iter(command_parts):flatten():totable(), ' ')
 
@@ -233,11 +279,15 @@ function adapter.build_spec(args)
     stream = function(data)
       return function()
         local lines = data()
+
+        if is_dap_run then
+          return parser.parse_lines(tree, dap_test_notifications, outline, { write_output = false })
+        end
+
         for _, line in ipairs(lines) do
           table.insert(partial_output, line)
         end
-        local tests = parser.parse_lines(tree, partial_output, outline, { write_output = false })
-        return tests
+        return parser.parse_lines(tree, partial_output, outline, { write_output = false })
       end
     end,
   }
@@ -281,15 +331,21 @@ end
 ---@param _ neotest.RunSpec
 ---@param result neotest.StrategyResult
 ---@param tree neotest.Tree
----@return table<string, neotest.Result[]>
+-- @return table<string, neotest.Result[]>
 function adapter.results(_, result, tree)
+  if is_dap_run then
+    -- return parser.parse_lines(tree, dap_test_notifications, outline)
+    local tests = parser.parse_lines(tree, dap_test_notifications, outline)
+    dap_test_notifications = {}
+    is_dap_run = false
+    return tests
+  end
   local success, data = pcall(lib.files.read, result.output)
   if not success then
     return {}
   end
   local lines = vim.split(data, '\n')
-  local tests = parser.parse_lines(tree, lines, outline)
-  return tests
+  return parser.parse_lines(tree, lines, outline)
 end
 
 setmetatable(adapter, {

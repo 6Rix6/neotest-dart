@@ -84,7 +84,7 @@ local function marshal_test_results(lines)
 
           if test_data.position_key then
             runtimes_by_position[test_data.position_key] = runtimes_by_position[test_data.position_key]
-              or {}
+                or {}
             table.insert(runtimes_by_position[test_data.position_key], test_data)
           end
         end
@@ -155,6 +155,10 @@ end
 ---@returns string path to output file
 local function prepare_neotest_output(test_result, unparsable_lines, opts)
   opts = opts or {}
+  if opts.write_output == false then
+    return nil
+  end
+
   local fname = async.fn.tempname()
   local file_output = {}
   if unparsable_lines then
@@ -184,9 +188,6 @@ local function prepare_neotest_output(test_result, unparsable_lines, opts)
     table.insert(file_output, 'Elapsed: ' .. test_time)
   end
   local flatten = vim.iter(file_output):flatten():totable()
-  if opts.write_output == false then
-    return table.concat(flatten, '\n')
-  end
   vim.fn.writefile(flatten, fname, 'b')
   return fname
 end
@@ -227,11 +228,11 @@ local function construct_diagnostic_errors(test_result)
     end
     if message then
       message = message
-        :gsub(
-          '══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════',
-          ''
-        )
-        :gsub('The following TestFailure was thrown running a test:', '')
+          :gsub(
+            '══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════',
+            ''
+          )
+          :gsub('The following TestFailure was thrown running a test:', '')
       return { { message = message, line = line } }
     end
   end
@@ -251,18 +252,18 @@ local function merge_test_results(test_results)
       end
 
       merged.skipped = merged.skipped == nil and test_result.skipped
-        or (merged.skipped and test_result.skipped)
+          or (merged.skipped and test_result.skipped)
       merged.time = (merged.time or 0) + (test_result.time or 0)
 
       append_message(merged, test_result.message)
       if test_result.error then
         merged.error = merged.error and (merged.error .. '\n' .. test_result.error)
-          or test_result.error
+            or test_result.error
       end
       if test_result.stack_trace then
         merged.stack_trace = merged.stack_trace
             and (merged.stack_trace .. '\n' .. test_result.stack_trace)
-          or test_result.stack_trace
+            or test_result.stack_trace
       end
     end
   end
